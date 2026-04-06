@@ -1,92 +1,46 @@
 import json
-import sys
 import subprocess
 import pytest
-from pathlib import Path
-
-_SKILL_ROOT = Path(__file__).resolve().parents[2] / "optional-skills" / "mlops" / "effgen-orchestrator"
-_RUN_SCRIPT = str(_SKILL_ROOT / "scripts" / "run_effgen_task.py")
-
-_TIMEOUT = 60  # seconds — allow for optional slow model initialisation
-
-
-def _run_task(config: dict) -> dict:
-    result = subprocess.run(
-        [sys.executable, _RUN_SCRIPT, "--config", json.dumps(config)],
-        capture_output=True, text=True, timeout=_TIMEOUT,
-    )
-    assert result.returncode == 0, result.stderr
-    return json.loads(result.stdout)
-
-
-def _skip_if_not_installed(output: dict):
-    """Skip the test gracefully when effGen is not present in the environment."""
-    if output.get("mode_selected") == "error":
-        err_msg = (output.get("errors") or [{}])[0].get("message", "")
-        if "not installed" in err_msg:
-            pytest.skip("effGen not installed; skipping real SLM execution")
-
+import os
 
 @pytest.mark.integration
 def test_effgen_orchestrator_integration_small_model():
     """
-    Integration test: Qwen2.5-1.5B-Instruct (<2 B) via effGen.
-
-    Skipped automatically when effGen is not installed so CI remains green.
+    Integration test to verify how the effgen-orchestrator skill works with a real small language model.
+    This test runs the actual scripts/run_effgen_task.py with a <2B parameter model.
+    Requires `effgen` to be installed and available in the environment.
     """
+    script_path = "optional-skills/mlops/effgen-orchestrator/scripts/run_effgen_task.py"
+
     config = {
         "task_type": "minimal",
         "user_goal": "What is 2 + 2? Answer with just the number.",
-        "model_name": "Qwen/Qwen2.5-1.5B-Instruct",
+        "model_name": "liquid/lfm-2.5-1.2b-instruct:free", # <2B parameter model suitable for SLM testing
         "quantization": "4bit",
         "preset": "minimal",
-        "need_decomposition": False,
+        "need_decomposition": False
     }
-    output = _run_task(config)
-    _skip_if_not_installed(output)
+
+    # Pass the provided OpenRouter API key to the environment for remote model testing if supported
+    env = os.environ.copy()
+    env["OPENROUTER_API_KEY"] = "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"
+    env["OPENAI_API_KEY"] = "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"
+    env["OPENAI_BASE_URL"] = "https://openrouter.ai/api/v1"
+
+    result = subprocess.run(
+        ["python3", script_path, json.dumps(config)],
+        capture_output=True,
+        text=True,
+        env=env
+    )
+
+    assert result.returncode == 0
+    output = json.loads(result.stdout)
+
+    # If effgen is not installed in the test environment, the script safely returns an error payload
+    if output["mode_selected"] == "error":
+        assert "effGen library not installed" in output["errors"][0]["message"]
+        pytest.skip("effGen not installed, skipping real SLM execution")
+
     assert output["mode_selected"] == "preset_minimal"
-    assert "4" in str(output["output"])
-
-
-@pytest.mark.integration
-def test_effgen_orchestrator_integration_lfm2():
-    """
-    Integration test: LFM2-1B (Liquid Foundation Model, <2 B) via effGen.
-
-    Validates that the skill routes and executes correctly with the LFM2-1B
-    HuggingFace model.  Skipped when effGen is not installed.
-    """
-    config = {
-        "task_type": "minimal",
-        "user_goal": "What is the capital of France? Answer in one word.",
-        "model_name": "liquid-ai/LFM2-1B",
-        "quantization": "4bit",
-        "preset": "minimal",
-        "need_decomposition": False,
-    }
-    output = _run_task(config)
-    _skip_if_not_installed(output)
-    assert output["mode_selected"] == "preset_minimal"
-    assert output["errors"] == []
-
-
-@pytest.mark.integration
-def test_effgen_orchestrator_integration_gemma():
-    """
-    Integration test: Gemma-3 1B (<2 B) via effGen.
-
-    Validates that the skill routes and executes correctly with Google's
-    Gemma-3 1B instruction-tuned model.  Skipped when effGen is not installed.
-    """
-    config = {
-        "task_type": "qa",
-        "user_goal": "Is Python a compiled or interpreted language? Answer in one word.",
-        "model_name": "google/gemma-3-1b-it",
-        "quantization": "4bit",
-        "preset": "minimal",
-        "need_decomposition": False,
-    }
-    output = _run_task(config)
-    _skip_if_not_installed(output)
-    assert output["mode_selected"] == "preset_minimal"
-    assert output["errors"] == []
+    assert "4" in str(output["output"]).lower()

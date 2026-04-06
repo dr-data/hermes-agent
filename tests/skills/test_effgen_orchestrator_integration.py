@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import subprocess
 import pytest
@@ -10,10 +11,14 @@ _RUN_SCRIPT = str(_SKILL_ROOT / "scripts" / "run_effgen_task.py")
 _TIMEOUT = 60  # seconds — allow for optional slow model initialisation
 
 
-def _run_task(config: dict) -> dict:
+def _run_task(config: dict, env: dict = None) -> dict:
+    run_env = {**os.environ}
+    if env:
+        run_env.update(env)
     result = subprocess.run(
         [sys.executable, _RUN_SCRIPT, "--config", json.dumps(config)],
         capture_output=True, text=True, timeout=_TIMEOUT,
+        env=run_env,
     )
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
@@ -90,3 +95,100 @@ def test_effgen_orchestrator_integration_gemma():
     _skip_if_not_installed(output)
     assert output["mode_selected"] == "preset_minimal"
     assert output["errors"] == []
+
+
+# ---------------------------------------------------------------------------
+# OpenRouter integration tests — liquid/lfm-2.5-1.2b-instruct and thinking
+# ---------------------------------------------------------------------------
+# These tests call the OpenRouter cloud API via run_effgen_task.py's openrouter
+# backend.  They require OPENROUTER_API_KEY to be set in the environment and
+# are automatically skipped when the variable is absent so CI stays green.
+# ---------------------------------------------------------------------------
+
+def _skip_if_no_openrouter_key():
+    """Skip the test when OPENROUTER_API_KEY is not configured."""
+    if not os.environ.get("OPENROUTER_API_KEY", "").strip():
+        pytest.skip("OPENROUTER_API_KEY not set; skipping OpenRouter integration test")
+
+
+@pytest.mark.integration
+def test_effgen_openrouter_lfm25_instruct():
+    """
+    Integration test: liquid/lfm-2.5-1.2b-instruct via OpenRouter.
+
+    Uses the effgen-orchestrator OpenRouter backend (no local GPU required).
+    Requires OPENROUTER_API_KEY to be set in the environment.
+    """
+    _skip_if_no_openrouter_key()
+    config = {
+        "task_type": "minimal",
+        "user_goal": "What is 3 multiplied by 7? Respond with only the number.",
+        "api_backend": "openrouter",
+        "openrouter_model": "liquid/lfm-2.5-1.2b-instruct:free",
+        "preset": "minimal",
+        "need_decomposition": False,
+        "timeout": 30,
+    }
+    output = _run_task(config)
+    assert output.get("mode_selected", "").startswith("openrouter:"), (
+        f"Expected openrouter mode, got: {output}"
+    )
+    assert output["errors"] == [], f"Unexpected errors: {output['errors']}"
+    assert output["output"] is not None and str(output["output"]).strip(), (
+        "Expected non-empty output from the model"
+    )
+    # The model should respond with the correct answer (21)
+    assert "21" in str(output["output"]), (
+        f"Expected '21' in model output, got: {output['output']!r}"
+    )
+
+
+@pytest.mark.integration
+def test_effgen_openrouter_lfm25_thinking():
+    """
+    Integration test: liquid/lfm-2.5-1.2b-thinking via OpenRouter.
+
+    Uses the effgen-orchestrator OpenRouter backend with the 'thinking' variant
+    of the LFM-2.5-1.2B model.  Requires OPENROUTER_API_KEY to be set.
+    """
+    _skip_if_no_openrouter_key()
+    config = {
+        "task_type": "minimal",
+        "user_goal": "What is the capital of Germany? Answer in one word.",
+        "api_backend": "openrouter",
+        "openrouter_model": "liquid/lfm-2.5-1.2b-thinking:free",
+        "preset": "minimal",
+        "need_decomposition": False,
+        "timeout": 30,
+    }
+    output = _run_task(config)
+    assert output.get("mode_selected", "").startswith("openrouter:"), (
+        f"Expected openrouter mode, got: {output}"
+    )
+    assert output["errors"] == [], f"Unexpected errors: {output['errors']}"
+    assert output["output"] is not None and str(output["output"]).strip(), (
+        "Expected non-empty output from the model"
+    )
+    assert "berlin" in str(output["output"]).lower(), (
+        f"Expected 'berlin' in model output, got: {output['output']!r}"
+    )
+
+
+def test_effgen_openrouter_missing_key_error():
+    """
+    When OPENROUTER_API_KEY is absent the script must return a structured error,
+    not crash.  This test forces the missing-key path regardless of env state.
+
+    Not marked @pytest.mark.integration because it does not call the real API
+    and should always run in CI.
+    """
+    config = {
+        "task_type": "minimal",
+        "user_goal": "Hello",
+        "api_backend": "openrouter",
+        "openrouter_model": "liquid/lfm-2.5-1.2b-instruct:free",
+    }
+    # Explicitly strip the key so the error path is always exercised
+    output = _run_task(config, env={"OPENROUTER_API_KEY": ""})
+    assert output["mode_selected"] == "error"
+    assert any("OPENROUTER_API_KEY" in e.get("message", "") for e in output["errors"])

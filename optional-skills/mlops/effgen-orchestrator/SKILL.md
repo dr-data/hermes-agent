@@ -5,9 +5,13 @@ version: 1.0.0
 platforms: [macos, linux]
 meta:
   hermes:
-    tags: [effgen, slm, agents, orchestration, automation, research, coding, ocr, rag]
+    tags: [effgen, slm, agents, orchestration, automation, research, coding, ocr, rag, lfm2, gemma, qwen]
     category: mlops
     requires_toolsets: [terminal]
+    tested_models:
+      - liquid-ai/LFM2-1B
+      - google/gemma-3-1b-it
+      - Qwen/Qwen2.5-1.5B-Instruct
 ---
 
 # effgen-orchestrator

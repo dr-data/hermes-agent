@@ -38,20 +38,31 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 def normalize_config(raw_config: Dict[str, Any]) -> Dict[str, Any]:
-    """Ensures all expected fields exist with sensible defaults."""
-    return {
-        "task_type": raw_config.get("task_type", "general"),
-        "user_goal": raw_config.get("user_goal", "No goal specified"),
-        "model_name": raw_config.get("model_name", "Qwen/Qwen2.5-3B-Instruct"),
-        "quantization": raw_config.get("quantization", "4bit"),
-        "preset": raw_config.get("preset", None),
-        "tools_needed": raw_config.get("tools_needed", []),
-        "custom_tools": raw_config.get("custom_tools", []),
-        "need_decomposition": raw_config.get("need_decomposition", False),
-        "need_memory": raw_config.get("need_memory", False),
-        "timeout": raw_config.get("timeout", 300),
-        "save_artifacts": raw_config.get("save_artifacts", False),
+    """Ensures all expected fields exist with sensible defaults.
+
+    Unknown keys from the caller (e.g. ``expected_output_schema``,
+    ``constraints``, ``need_self_correction``, ``input_paths``,
+    ``working_directory``) are preserved so that callers do not lose data.
+    """
+    defaults = {
+        "task_type": "general",
+        "user_goal": "No goal specified",
+        "model_name": "Qwen/Qwen2.5-3B-Instruct",
+        "quantization": "4bit",
+        "preset": None,
+        "tools_needed": [],
+        "custom_tools": [],
+        "need_decomposition": False,
+        "need_memory": False,
+        "timeout": 300,
+        "save_artifacts": False,
     }
+
+    normalized = dict(raw_config)
+    for key, value in defaults.items():
+        normalized.setdefault(key, value)
+
+    return normalized
 
 def build_error_result(error_msg: str, details: str = "") -> Dict[str, Any]:
     """Constructs a standard error JSON object."""

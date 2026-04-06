@@ -83,6 +83,7 @@ def main():
     args = parser.parse_args()
 
     config_data = {}
+    parse_error = None
     try:
         if args.config_file:
             with open(args.config_file, 'r') as f:
@@ -93,10 +94,13 @@ def main():
                 if stdin_data:
                     config_data = json.loads(stdin_data)
     except Exception as e:
-        # Never crash on parsing errors, return fallback
-        pass
+        parse_error = str(e)
 
     result = analyze_config(config_data)
+
+    if parse_error is not None:
+        result["parse_error"] = True
+        result["reason"] = f"parse error: {parse_error}"
 
     print(json.dumps(result, indent=2))
 

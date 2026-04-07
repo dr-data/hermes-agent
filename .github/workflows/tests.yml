@@ -73,7 +73,7 @@ jobs:
   effgen-openrouter:
     name: effgen OpenRouter integration tests
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     # Only run when the secret is available (forks won't have it)
     if: ${{ secrets.OPENROUTER_API != '' }}
     steps:

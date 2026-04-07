@@ -80,6 +80,28 @@ def _skip_if_no_openrouter_key():
         pytest.skip("OPENROUTER_API_KEY / OPENROUTER_API not set; skipping OpenRouter test")
 
 
+def _is_temporary_openrouter_upstream_429(error: dict) -> bool:
+    """Return True for transient upstream 429 errors that should be skipped in CI."""
+    message = str(error.get("message", "")).lower()
+    details = str(error.get("details", "")).lower()
+    return (
+        "http 429" in message
+        and (
+            "temporarily rate-limited upstream" in details
+            or "please retry shortly" in details
+        )
+    )
+
+
+def _skip_if_temporary_openrouter_upstream_429(output: dict, model: str):
+    """Skip flaky assertions when OpenRouter reports transient upstream throttling."""
+    for err in output.get("errors", []) or []:
+        if isinstance(err, dict) and _is_temporary_openrouter_upstream_429(err):
+            pytest.skip(
+                f"OpenRouter upstream is temporarily rate-limited for {model}; skipping"
+            )
+
+
 def _openrouter_config(model: str, goal: str, task_type: str = "minimal", **extra) -> dict:
     """Return a minimal OpenRouter config dict with sensible defaults."""
     cfg = {
@@ -214,6 +236,7 @@ def test_effgen_openrouter_gemma3n_e2b():
     )
     output = _run_task(config)
     _assert_valid_result_schema(output)
+    _skip_if_temporary_openrouter_upstream_429(output, "google/gemma-3n-e2b-it:free")
     assert output["mode_selected"].startswith("openrouter:")
     assert output["errors"] == [], f"Unexpected errors: {output['errors']}"
     assert output["output"] is not None and str(output["output"]).strip()
@@ -265,6 +288,7 @@ def test_openrouter_result_mode_label_contains_model_name():
     model = "google/gemma-3n-e2b-it:free"
     config = _openrouter_config(model, "Say 'ok'.")
     output = _run_task(config)
+    _skip_if_temporary_openrouter_upstream_429(output, model)
     assert output["mode_selected"] == f"openrouter:{model}", (
         f"Unexpected mode_selected: {output['mode_selected']!r}"
     )
@@ -335,6 +359,7 @@ def test_openrouter_routing_qa_task_type_gemma():
     )
     output = _run_task(config)
     _assert_valid_result_schema(output)
+    _skip_if_temporary_openrouter_upstream_429(output, "google/gemma-3n-e2b-it:free")
     assert output["errors"] == []
     assert "8" in str(output["output"]), (
         f"Expected '8' in output, got: {output['output']!r}"
@@ -391,6 +416,7 @@ def test_openrouter_summarisation_gemma():
     )
     output = _run_task(config)
     _assert_valid_result_schema(output)
+    _skip_if_temporary_openrouter_upstream_429(output, "google/gemma-3n-e2b-it:free")
     assert output["errors"] == []
     result_text = str(output["output"]).strip()
     assert len(result_text) > 10, "Expected a non-trivial summary"
@@ -448,11 +474,32 @@ def test_openrouter_all_three_models_answer_same_question():
         config = _openrouter_config(model, question)
         output = _run_task(config)
         _assert_valid_result_schema(output)
+        _skip_if_temporary_openrouter_upstream_429(output, model)
         if output["errors"]:
             failures.append(f"{model}: errors={output['errors']}")
         elif "5" not in str(output["output"]):
             failures.append(f"{model}: expected '5', got {output['output']!r}")
     assert not failures, "Some models failed:\n" + "\n".join(failures)
+
+
+def test_is_temporary_openrouter_upstream_429_detection():
+    error = {
+        "message": "OpenRouter API returned HTTP 429.",
+        "details": (
+            '{"error":{"message":"Provider returned error","code":429,'
+            '"metadata":{"raw":"model is temporarily rate-limited upstream. '
+            'Please retry shortly"}}}'
+        ),
+    }
+    assert _is_temporary_openrouter_upstream_429(error) is True
+
+
+def test_is_temporary_openrouter_upstream_429_not_matched_for_other_429():
+    error = {
+        "message": "OpenRouter API returned HTTP 429.",
+        "details": '{"error":{"message":"Insufficient credits","code":429}}',
+    }
+    assert _is_temporary_openrouter_upstream_429(error) is False
 
 
 # ---- Error path (always-on, no real API call) ---------------------------------

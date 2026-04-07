@@ -10,8 +10,9 @@ name: effgen OpenRouter – Manual Test
 #   GitHub → Actions → "effgen OpenRouter – Manual Test" → Run workflow
 #   Select the branch and (optionally) override the inputs below.
 #
-# The OPENROUTER_API_KEY is read from the "OPENROUTER_API" repository secret.
-# The workflow will fail fast if the secret is absent.
+# The OPENROUTER_API_KEY is read from either the "OPENROUTER_API_KEY"
+# or "OPENROUTER_API" repository/environment secret.
+# The workflow will fail fast if both are absent.
 # ────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -45,6 +46,7 @@ jobs:
     name: effgen OpenRouter – ${{ github.ref_name }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment: copilot
 
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────────────
@@ -66,16 +68,16 @@ jobs:
           uv pip install -e ".[all,dev]"
 
       # ── 4. Verify secret is present ───────────────────────────────────────
-      - name: Verify OPENROUTER_API secret is set
+      - name: Verify OpenRouter API secret is set
         run: |
           if [ -z "$OPENROUTER_API_KEY" ]; then
-            echo "::error::The OPENROUTER_API repository secret is not set."
+            echo "::error::Neither OPENROUTER_API_KEY nor OPENROUTER_API is set."
             echo "::error::Add it at: Settings → Secrets and variables → Actions → New repository secret"
             exit 1
           fi
           echo "✅ OPENROUTER_API_KEY is present (${#OPENROUTER_API_KEY} chars)"
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || secrets.OPENROUTER_API }}
 
       # ── 5. Smoke-test the endpoint ────────────────────────────────────────
       - name: Smoke-test OpenRouter /models endpoint
@@ -90,7 +92,7 @@ jobs:
           fi
           echo "✅ OpenRouter API is reachable"
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || secrets.OPENROUTER_API }}
 
       # ── 6. Always-on error-path test (no real API call) ──────────────────
       - name: Run always-on tests (no key required)
@@ -126,7 +128,7 @@ jobs:
           source .venv/bin/activate
           eval "${{ steps.build_cmd.outputs.cmd }}"
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || secrets.OPENROUTER_API }}
 
       # ── 9. Upload pytest output on failure ───────────────────────────────
       - name: Upload test results on failure

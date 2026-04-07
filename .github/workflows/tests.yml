@@ -74,8 +74,9 @@ jobs:
     name: effgen OpenRouter integration tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Only run when the secret is available (forks won't have it)
-    if: ${{ secrets.OPENROUTER_API != '' }}
+    environment: copilot
+    # Only run when either OpenRouter secret is available (forks won't have it)
+    if: ${{ secrets.OPENROUTER_API_KEY != '' || secrets.OPENROUTER_API != '' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -97,4 +98,4 @@ jobs:
           source .venv/bin/activate
           python -m pytest tests/skills/test_effgen_orchestrator_integration.py -v --tb=short -p no:xdist -o "addopts=" -m integration
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || secrets.OPENROUTER_API }}

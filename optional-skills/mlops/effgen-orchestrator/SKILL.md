@@ -26,7 +26,7 @@ meta:
 pip install effgen        # CPU / basic
 pip install effgen[vllm]  # vLLM-accelerated inference
 ```
-See the [effGen GitHub repository](https://github.com/emrgnt-cmplxty/effgen) for setup details.
+See the [effGen GitHub repository](https://github.com/ctrl-gaurav/effGen) for setup details.
 
 **OpenRouter cloud backend** (no local GPU required):
 Set `OPENROUTER_API_KEY` in your environment (`~/.hermes/.env`) and use

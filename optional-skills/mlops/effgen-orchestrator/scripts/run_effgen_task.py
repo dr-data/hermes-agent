@@ -220,7 +220,7 @@ def run_via_openrouter(config: Dict[str, Any]) -> Dict[str, Any]:
             "Set OPENROUTER_API_KEY to your OpenRouter API key before running this script.",
         )
 
-    model = config.get("openrouter_model") or config.get("model_name", "liquid/lfm-2.5-1.2b-instruct")
+    model = config.get("openrouter_model") or config["model_name"]
     goal = config["user_goal"]
     timeout_s = int(config.get("timeout", 60))
 

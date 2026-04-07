@@ -8,7 +8,7 @@ from pathlib import Path
 _SKILL_ROOT = Path(__file__).resolve().parents[2] / "optional-skills" / "mlops" / "effgen-orchestrator"
 _RUN_SCRIPT = str(_SKILL_ROOT / "scripts" / "run_effgen_task.py")
 
-_TIMEOUT = 60  # seconds — allow for optional slow model initialisation
+_TIMEOUT = 60  # seconds — allow for optional slow model initialization
 
 
 def _run_task(config: dict, env: dict = None) -> dict:

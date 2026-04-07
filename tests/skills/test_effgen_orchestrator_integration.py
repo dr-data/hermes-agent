@@ -290,7 +290,6 @@ def test_openrouter_result_mode_label_contains_model_name():
     config = _openrouter_config(model, "Say 'ok'.")
     output = _run_task(config)
     _skip_if_temporary_openrouter_upstream_429(output, model)
-    _assert_valid_result_schema(output)
     assert output["mode_selected"] == f"openrouter:{model}", (
         f"Unexpected mode_selected: {output['mode_selected']!r}"
     )

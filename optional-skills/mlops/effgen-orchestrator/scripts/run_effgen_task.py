@@ -213,11 +213,14 @@ def run_via_openrouter(config: Dict[str, Any]) -> Dict[str, Any]:
     import urllib.request
     import urllib.error
 
-    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    api_key = (
+        os.environ.get("OPENROUTER_API_KEY", "").strip()
+        or os.environ.get("OPENROUTER_API", "").strip()
+    )
     if not api_key:
         return build_error_result(
             "OPENROUTER_API_KEY environment variable is not set.",
-            "Set OPENROUTER_API_KEY to your OpenRouter API key before running this script.",
+            "Set OPENROUTER_API_KEY (or OPENROUTER_API) to your OpenRouter API key before running this script.",
         )
 
     model = config.get("openrouter_model") or config["model_name"]

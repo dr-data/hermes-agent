@@ -29,7 +29,7 @@ pip install effgen[vllm]  # vLLM-accelerated inference
 See the [effGen GitHub repository](https://github.com/ctrl-gaurav/effGen) for setup details.
 
 **OpenRouter cloud backend** (no local GPU required):
-Set `OPENROUTER_API_KEY` in your environment (`~/.hermes/.env`) and use
+Set `OPENROUTER_API_KEY` (or `OPENROUTER_API`) in your environment (`~/.hermes/.env`) and use
 `api_backend: "openrouter"` with any `openrouter_model` in the config.
 
 

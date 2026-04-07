@@ -106,9 +106,13 @@ def test_effgen_orchestrator_integration_gemma():
 # ---------------------------------------------------------------------------
 
 def _skip_if_no_openrouter_key():
-    """Skip the test when OPENROUTER_API_KEY is not configured."""
-    if not os.environ.get("OPENROUTER_API_KEY", "").strip():
-        pytest.skip("OPENROUTER_API_KEY not set; skipping OpenRouter integration test")
+    """Skip the test when neither OPENROUTER_API_KEY nor OPENROUTER_API is configured."""
+    has_key = (
+        os.environ.get("OPENROUTER_API_KEY", "").strip()
+        or os.environ.get("OPENROUTER_API", "").strip()
+    )
+    if not has_key:
+        pytest.skip("OPENROUTER_API_KEY / OPENROUTER_API not set; skipping OpenRouter integration test")
 
 
 @pytest.mark.integration
@@ -219,7 +223,7 @@ def test_effgen_openrouter_missing_key_error():
         "api_backend": "openrouter",
         "openrouter_model": "liquid/lfm-2.5-1.2b-instruct:free",
     }
-    # Explicitly strip the key so the error path is always exercised
-    output = _run_task(config, env={"OPENROUTER_API_KEY": ""})
+    # Explicitly strip both key names so the error path is always exercised
+    output = _run_task(config, env={"OPENROUTER_API_KEY": "", "OPENROUTER_API": ""})
     assert output["mode_selected"] == "error"
     assert any("OPENROUTER_API_KEY" in e.get("message", "") for e in output["errors"])

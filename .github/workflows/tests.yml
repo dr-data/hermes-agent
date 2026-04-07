@@ -68,3 +68,32 @@ jobs:
           OPENROUTER_API_KEY: ""
           OPENAI_API_KEY: ""
           NOUS_API_KEY: ""
+
+  effgen-openrouter:
+    name: effgen OpenRouter integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Only run when the secret is available (forks won't have it)
+    if: ${{ secrets.OPENROUTER_API != '' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: |
+          uv venv .venv --python 3.11
+          source .venv/bin/activate
+          uv pip install -e ".[all,dev]"
+
+      - name: Run effgen OpenRouter integration tests
+        run: |
+          source .venv/bin/activate
+          python -m pytest tests/skills/test_effgen_orchestrator_integration.py -v --tb=short -p no:xdist -o "addopts=" -m integration
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API }}

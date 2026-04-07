@@ -230,12 +230,13 @@ def test_effgen_openrouter_gemma3n_e2b():
     Validates Google's Gemma 3n Edge 2B model on a basic arithmetic task.
     """
     _skip_if_no_openrouter_key()
+    model = "google/gemma-3n-e2b-it:free"
     config = _openrouter_config(
-        "google/gemma-3n-e2b-it:free",
+        model,
         "What is 6 plus 9? Respond with only the number.",
     )
     output = _run_task(config)
-    _skip_if_temporary_openrouter_upstream_429(output, "google/gemma-3n-e2b-it:free")
+    _skip_if_temporary_openrouter_upstream_429(output, model)
     _assert_valid_result_schema(output)
     assert output["mode_selected"].startswith("openrouter:")
     assert output["errors"] == [], f"Unexpected errors: {output['errors']}"
@@ -353,13 +354,14 @@ def test_openrouter_routing_qa_task_type_gemma():
     Validates that Gemma 3n correctly answers a knowledge question.
     """
     _skip_if_no_openrouter_key()
+    model = "google/gemma-3n-e2b-it:free"
     config = _openrouter_config(
-        "google/gemma-3n-e2b-it:free",
+        model,
         "How many planets are in the solar system? Answer with only the number.",
         task_type="qa",
     )
     output = _run_task(config)
-    _skip_if_temporary_openrouter_upstream_429(output, "google/gemma-3n-e2b-it:free")
+    _skip_if_temporary_openrouter_upstream_429(output, model)
     _assert_valid_result_schema(output)
     assert output["errors"] == []
     assert "8" in str(output["output"]), (
@@ -401,6 +403,7 @@ def test_openrouter_summarisation_gemma():
     This validates the model's text-compression capability via the skill.
     """
     _skip_if_no_openrouter_key()
+    model = "google/gemma-3n-e2b-it:free"
     paragraph = (
         "The Python programming language was created by Guido van Rossum and first "
         "released in 1991. It emphasises code readability and simplicity, making it "
@@ -410,13 +413,13 @@ def test_openrouter_summarisation_gemma():
         "functional programming."
     )
     config = _openrouter_config(
-        "google/gemma-3n-e2b-it:free",
+        model,
         f"Summarise the following in exactly one sentence:\n\n{paragraph}",
         task_type="general",
         timeout=60,
     )
     output = _run_task(config)
-    _skip_if_temporary_openrouter_upstream_429(output, "google/gemma-3n-e2b-it:free")
+    _skip_if_temporary_openrouter_upstream_429(output, model)
     _assert_valid_result_schema(output)
     assert output["errors"] == []
     result_text = str(output["output"]).strip()

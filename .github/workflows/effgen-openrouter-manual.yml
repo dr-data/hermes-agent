@@ -1,0 +1,140 @@
+name: effgen OpenRouter – Manual Test
+
+# ────────────────────────────────────────────────────────────────────────────
+# Purpose
+# ────────────────────────────────────────────────────────────────────────────
+# A standalone, on-demand workflow for testing the effgen-orchestrator skill
+# against the OpenRouter API (no push / PR required).
+#
+# How to run:
+#   GitHub → Actions → "effgen OpenRouter – Manual Test" → Run workflow
+#   Select the branch and (optionally) override the inputs below.
+#
+# The OPENROUTER_API_KEY is read from the "OPENROUTER_API" repository secret.
+# The workflow will fail fast if the secret is absent.
+# ────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_filter:
+        description: >
+          pytest -k expression to select specific tests.
+          Leave blank to run ALL OpenRouter integration tests.
+          Examples: "lfm25_instruct", "gemma", "routing", "chain_of_thought"
+        required: false
+        default: ""
+      extra_pytest_args:
+        description: >
+          Additional pytest arguments (e.g. "--timeout=120 -x").
+          Appended verbatim to the pytest command.
+        required: false
+        default: ""
+      python_version:
+        description: Python version to use
+        required: false
+        default: "3.11"
+
+# Only one manual run at a time per branch; new dispatch cancels the previous.
+concurrency:
+  group: effgen-openrouter-manual-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  effgen-openrouter-manual:
+    name: effgen OpenRouter – ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────
+      - name: Checkout ${{ github.ref_name }}
+        uses: actions/checkout@v4
+
+      # ── 2. Python + uv ───────────────────────────────────────────────────
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python ${{ inputs.python_version }}
+        run: uv python install ${{ inputs.python_version }}
+
+      # ── 3. Dependencies ───────────────────────────────────────────────────
+      - name: Install project dependencies
+        run: |
+          uv venv .venv --python ${{ inputs.python_version }}
+          source .venv/bin/activate
+          uv pip install -e ".[all,dev]"
+
+      # ── 4. Verify secret is present ───────────────────────────────────────
+      - name: Verify OPENROUTER_API secret is set
+        run: |
+          if [ -z "$OPENROUTER_API_KEY" ]; then
+            echo "::error::The OPENROUTER_API repository secret is not set."
+            echo "::error::Add it at: Settings → Secrets and variables → Actions → New repository secret"
+            exit 1
+          fi
+          echo "✅ OPENROUTER_API_KEY is present (${#OPENROUTER_API_KEY} chars)"
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API }}
+
+      # ── 5. Smoke-test the endpoint ────────────────────────────────────────
+      - name: Smoke-test OpenRouter /models endpoint
+        run: |
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+            https://openrouter.ai/api/v1/models)
+          echo "OpenRouter /models HTTP status: $HTTP_CODE"
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::OpenRouter API returned HTTP $HTTP_CODE — check that the key is valid."
+            exit 1
+          fi
+          echo "✅ OpenRouter API is reachable"
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API }}
+
+      # ── 6. Always-on error-path test (no real API call) ──────────────────
+      - name: Run always-on tests (no key required)
+        run: |
+          source .venv/bin/activate
+          python -m pytest tests/skills/test_effgen_orchestrator_integration.py \
+            tests/skills/test_effgen_orchestrator.py \
+            -v --tb=short -p no:xdist -o "addopts=" \
+            --ignore-glob="*integration*" -m "not integration"
+        env:
+          OPENROUTER_API_KEY: ""
+          OPENROUTER_API: ""
+
+      # ── 7. Build the pytest command ───────────────────────────────────────
+      - name: Build pytest command
+        id: build_cmd
+        run: |
+          BASE="python -m pytest tests/skills/test_effgen_orchestrator_integration.py -v --tb=long -p no:xdist -o addopts= -m integration"
+          FILTER="${{ inputs.test_filter }}"
+          EXTRA="${{ inputs.extra_pytest_args }}"
+          if [ -n "$FILTER" ]; then
+            BASE="$BASE -k '$FILTER'"
+          fi
+          if [ -n "$EXTRA" ]; then
+            BASE="$BASE $EXTRA"
+          fi
+          echo "cmd=$BASE" >> "$GITHUB_OUTPUT"
+          echo "Full command: $BASE"
+
+      # ── 8. Run OpenRouter integration tests ───────────────────────────────
+      - name: Run effgen OpenRouter integration tests
+        run: |
+          source .venv/bin/activate
+          eval "${{ steps.build_cmd.outputs.cmd }}"
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API }}
+
+      # ── 9. Upload pytest output on failure ───────────────────────────────
+      - name: Upload test results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-output-${{ github.run_id }}
+          path: |
+            .pytest_cache/
+            **/.pytest_cache/
+          retention-days: 7

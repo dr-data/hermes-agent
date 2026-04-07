@@ -1,0 +1,28 @@
+{
+  "task_type": "research",
+  "user_goal": "Search the web for the latest advancements in quantum computing and summarize the top 3 breakthroughs.",
+  "model_name": "Qwen/Qwen2.5-3B-Instruct",
+  "quantization": "4bit",
+  "preset": "research",
+  "tools_needed": [
+    "WebSearch",
+    "URLFetch",
+    "Wikipedia"
+  ],
+  "custom_tools": [],
+  "need_decomposition": false,
+  "need_memory": false,
+  "need_self_correction": true,
+  "expected_output_schema": {
+    "type": "object",
+    "properties": {
+      "breakthroughs": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    }
+  },
+  "constraints": "Keep the summary concise.",
+  "timeout": 300,
+  "save_artifacts": true
+}

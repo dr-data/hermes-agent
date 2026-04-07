@@ -95,7 +95,7 @@ def _is_temporary_openrouter_upstream_429(error: dict) -> bool:
 
 def _skip_if_temporary_openrouter_upstream_429(output: dict, model: str):
     """Skip flaky assertions when OpenRouter reports transient upstream throttling."""
-    for err in output.get("errors", []) or []:
+    for err in output.get("errors", []):
         if isinstance(err, dict) and _is_temporary_openrouter_upstream_429(err):
             pytest.skip(
                 f"OpenRouter upstream is temporarily rate-limited for {model}; skipping"
@@ -235,8 +235,8 @@ def test_effgen_openrouter_gemma3n_e2b():
         "What is 6 plus 9? Respond with only the number.",
     )
     output = _run_task(config)
-    _assert_valid_result_schema(output)
     _skip_if_temporary_openrouter_upstream_429(output, "google/gemma-3n-e2b-it:free")
+    _assert_valid_result_schema(output)
     assert output["mode_selected"].startswith("openrouter:")
     assert output["errors"] == [], f"Unexpected errors: {output['errors']}"
     assert output["output"] is not None and str(output["output"]).strip()
@@ -289,6 +289,7 @@ def test_openrouter_result_mode_label_contains_model_name():
     config = _openrouter_config(model, "Say 'ok'.")
     output = _run_task(config)
     _skip_if_temporary_openrouter_upstream_429(output, model)
+    _assert_valid_result_schema(output)
     assert output["mode_selected"] == f"openrouter:{model}", (
         f"Unexpected mode_selected: {output['mode_selected']!r}"
     )
@@ -358,8 +359,8 @@ def test_openrouter_routing_qa_task_type_gemma():
         task_type="qa",
     )
     output = _run_task(config)
-    _assert_valid_result_schema(output)
     _skip_if_temporary_openrouter_upstream_429(output, "google/gemma-3n-e2b-it:free")
+    _assert_valid_result_schema(output)
     assert output["errors"] == []
     assert "8" in str(output["output"]), (
         f"Expected '8' in output, got: {output['output']!r}"
@@ -415,8 +416,8 @@ def test_openrouter_summarisation_gemma():
         timeout=60,
     )
     output = _run_task(config)
-    _assert_valid_result_schema(output)
     _skip_if_temporary_openrouter_upstream_429(output, "google/gemma-3n-e2b-it:free")
+    _assert_valid_result_schema(output)
     assert output["errors"] == []
     result_text = str(output["output"]).strip()
     assert len(result_text) > 10, "Expected a non-trivial summary"
@@ -473,8 +474,8 @@ def test_openrouter_all_three_models_answer_same_question():
     for model in models:
         config = _openrouter_config(model, question)
         output = _run_task(config)
-        _assert_valid_result_schema(output)
         _skip_if_temporary_openrouter_upstream_429(output, model)
+        _assert_valid_result_schema(output)
         if output["errors"]:
             failures.append(f"{model}: errors={output['errors']}")
         elif "5" not in str(output["output"]):

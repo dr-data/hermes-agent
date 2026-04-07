@@ -199,7 +199,7 @@ def test_normalize_config_lfm2_model():
 
 
 def test_select_mode_lfm2_research_preset():
-    """Mode selection routes an LFM2 config with explicit preset to 'preset'."""
+    """Mode selection routes an LFM2 config with explicit preset to a preset_ mode."""
     mod = _load_run_module()
     cfg = mod.normalize_config({
         "task_type": "research",
@@ -207,7 +207,8 @@ def test_select_mode_lfm2_research_preset():
         "model_name": "liquid-ai/LFM2-1B",
         "preset": "research",
     })
-    assert mod.select_mode(cfg) == "preset"
+    mode = mod._get_mode_info(cfg)["mode_selected"]
+    assert mode.startswith("preset_"), f"Expected preset_ mode, got: {mode}"
 
 
 def test_normalize_config_gemma_small_model():
@@ -235,7 +236,7 @@ def test_select_mode_gemma_memory_augmented():
         "model_name": "google/gemma-3-1b-it",
         "need_memory": True,
     })
-    assert mod.select_mode(cfg) == "memory_augmented_run"
+    assert mod._get_mode_info(cfg)["mode_selected"] == "memory_augmented_run"
 
 
 def test_select_effgen_mode_script_lfm2():
@@ -281,3 +282,44 @@ def test_select_effgen_mode_script_bad_json():
     assert result.returncode == 0
     output = json.loads(result.stdout)
     assert output.get("parse_error") is True
+
+
+def test_run_effgen_task_multi_agent_returns_error():
+    """run_effgen_task.py must return a structured error for unimplemented multi-agent mode."""
+    config = {
+        "task_type": "complex",
+        "user_goal": "Decompose and coordinate multiple sub-agents.",
+        "api_backend": None,          # local effGen path
+        "need_decomposition": True,   # triggers custom_multi_agent
+    }
+    result = subprocess.run(
+        [sys.executable, _RUN_SCRIPT, "--config", json.dumps(config)],
+        capture_output=True, text=True, timeout=_TIMEOUT,
+    )
+    assert result.returncode == 0
+    output = json.loads(result.stdout)
+    # Either effGen is not installed (first error) or the mode is not implemented.
+    assert output["mode_selected"] in ("error",), (
+        f"Expected 'error', got: {output['mode_selected']!r}"
+    )
+    assert len(output["errors"]) > 0
+
+
+def test_run_effgen_task_tool_pipeline_returns_error():
+    """run_effgen_task.py must return a structured error for unimplemented tool-pipeline mode."""
+    config = {
+        "task_type": "general",
+        "user_goal": "Run a custom domain tool.",
+        "api_backend": None,
+        "custom_tools": ["my_custom_tool"],  # triggers custom_tool_pipeline
+    }
+    result = subprocess.run(
+        [sys.executable, _RUN_SCRIPT, "--config", json.dumps(config)],
+        capture_output=True, text=True, timeout=_TIMEOUT,
+    )
+    assert result.returncode == 0
+    output = json.loads(result.stdout)
+    assert output["mode_selected"] in ("error",), (
+        f"Expected 'error', got: {output['mode_selected']!r}"
+    )
+    assert len(output["errors"]) > 0

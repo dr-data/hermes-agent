@@ -20,6 +20,7 @@ import sys
 import json
 import argparse
 import traceback
+from pathlib import Path
 from typing import Dict, Any
 
 # ---------------------------------------------------------------------------
@@ -96,7 +97,13 @@ def build_error_result(error_msg: str, details: str = "") -> Dict[str, Any]:
 
 
 def collect_artifacts() -> list[str]:
-    """Placeholder for collecting generated artifacts."""
+    """Return file paths written by effGen during the task.
+
+    Currently returns an empty list because effGen does not yet expose a
+    stable artifact-discovery API.  When ``save_artifacts`` is ``True`` the
+    caller should inspect the working directory after the run to find any
+    files written by the agent.
+    """
     return []
 
 
@@ -145,15 +152,19 @@ def run_custom_single_agent(config: Dict[str, Any], model: Any, goal: str) -> Di
 
 
 def run_custom_multi_agent(config: Dict[str, Any], model: Any, goal: str) -> Dict[str, Any]:
-    # Placeholder for multi-agent implementation
-    output_text = f"Simulated execution of multi-agent decomposition for goal: {goal}"
-    return emit_result("custom_multi_agent", "Task completed using custom multi-agent.", output_text, collect_artifacts())
+    return build_error_result(
+        "custom_multi_agent mode is not yet implemented for local effGen execution.",
+        "Use a preset (e.g. preset_general) or the OpenRouter backend instead, "
+        "or remove need_decomposition from the config.",
+    )
 
 
 def run_custom_tool_pipeline(config: Dict[str, Any], model: Any, goal: str) -> Dict[str, Any]:
-    # Placeholder for custom tool pipeline implementation
-    output_text = f"Simulated execution of custom tool pipeline for goal: {goal}"
-    return emit_result("custom_tool_pipeline", "Task completed using custom tool pipeline.", output_text, collect_artifacts())
+    return build_error_result(
+        "custom_tool_pipeline mode is not yet implemented for local effGen execution.",
+        "Use preset_general with tools_needed, or the OpenRouter backend instead, "
+        "or remove custom_tools from the config.",
+    )
 
 
 def run_memory_augmented(config: Dict[str, Any], model: Any, goal: str) -> Dict[str, Any]:
@@ -169,18 +180,21 @@ def run_memory_augmented(config: Dict[str, Any], model: Any, goal: str) -> Dict[
     return emit_result("memory_augmented_run", "Task completed using memory augmented agent.", output_text, collect_artifacts())
 
 
-def select_mode(config: Dict[str, Any]) -> str:
-    # Logic matching select_effgen_mode.py
-    if config["need_decomposition"]:
-        return "custom_multi_agent"
-    elif config["custom_tools"]:
-        return "custom_tool_pipeline"
-    elif config["need_memory"]:
-        return "memory_augmented_run"
-    elif config["preset"]:
-        return "preset"
-    else:
-        return "custom_single_agent"
+def _get_mode_info(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Determine the execution mode by delegating to select_effgen_mode.analyze_config().
+
+    Imports the sibling script dynamically so there is no duplicate routing
+    logic between the two scripts.  The returned dict has the same shape as
+    ``analyze_config()`` output::
+
+        {"mode_selected": "preset_research", "preset": "research", ...}
+    """
+    import importlib.util as _util
+    _here = Path(__file__).resolve().parent
+    _spec = _util.spec_from_file_location("select_effgen_mode", _here / "select_effgen_mode.py")
+    _mod = _util.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    return _mod.analyze_config(config)
 
 
 # ---------------------------------------------------------------------------
@@ -199,14 +213,17 @@ def run_via_openrouter(config: Dict[str, Any]) -> Dict[str, Any]:
     import urllib.request
     import urllib.error
 
-    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    api_key = (
+        os.environ.get("OPENROUTER_API_KEY", "").strip()
+        or os.environ.get("OPENROUTER_API", "").strip()
+    )
     if not api_key:
         return build_error_result(
             "OPENROUTER_API_KEY environment variable is not set.",
-            "Set OPENROUTER_API_KEY to your OpenRouter API key before running this script.",
+            "Set OPENROUTER_API_KEY (or OPENROUTER_API) to your OpenRouter API key before running this script.",
         )
 
-    model = config.get("openrouter_model") or config.get("model_name", "liquid/lfm-2.5-1.2b-instruct")
+    model = config.get("openrouter_model") or config["model_name"]
     goal = config["user_goal"]
     timeout_s = int(config.get("timeout", 60))
 
@@ -285,11 +302,13 @@ def run_effgen(config: Dict[str, Any]) -> Dict[str, Any]:
         return build_error_result("Failed to load model.", str(e))
 
     goal = config["user_goal"]
-    mode = select_mode(config)
+    mode_info = _get_mode_info(config)
+    mode = mode_info["mode_selected"]
+    preset_name = mode_info.get("preset")
 
     try:
-        if mode == "preset":
-            return run_preset_mode(config["preset"], model, goal)
+        if mode.startswith("preset_"):
+            return run_preset_mode(preset_name or mode[len("preset_"):], model, goal)
         elif mode == "custom_multi_agent":
             return run_custom_multi_agent(config, model, goal)
         elif mode == "custom_tool_pipeline":

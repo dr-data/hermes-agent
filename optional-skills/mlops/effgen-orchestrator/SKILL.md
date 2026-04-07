@@ -1,22 +1,38 @@
 ---
 name: effgen-orchestrator
 description: Use local effGen as a specialist SLM execution framework for presets, routing, decomposition, tools, memory-aware runs, and multi-agent workflows.
-version: 1.0.0
+version: 1.1.0
 platforms: [macos, linux]
 meta:
   hermes:
-    tags: [effgen, slm, agents, orchestration, automation, research, coding, ocr, rag, lfm2, gemma, qwen]
+    tags: [effgen, slm, agents, orchestration, automation, research, coding, ocr, rag, lfm2, gemma, qwen, openrouter]
     category: mlops
     requires_toolsets: [terminal]
     tested_models:
       - liquid-ai/LFM2-1B
       - google/gemma-3-1b-it
       - Qwen/Qwen2.5-1.5B-Instruct
+      - liquid/lfm-2.5-1.2b-instruct:free   # OpenRouter cloud
+      - liquid/lfm-2.5-1.2b-thinking:free   # OpenRouter cloud
+      - google/gemma-3n-e2b-it:free         # OpenRouter cloud
 ---
 
 # effgen-orchestrator
 
-## When to Use
+## Installation
+
+**Local effGen backend** (requires GPU or CPU with sufficient RAM):
+```bash
+pip install effgen        # CPU / basic
+pip install effgen[vllm]  # vLLM-accelerated inference
+```
+See the [effGen GitHub repository](https://github.com/ctrl-gaurav/effGen) for setup details.
+
+**OpenRouter cloud backend** (no local GPU required):
+Set `OPENROUTER_API_KEY` (or `OPENROUTER_API`) in your environment (`~/.hermes/.env`) and use
+`api_backend: "openrouter"` with any `openrouter_model` in the config.
+
+
 Use this skill for tasks that benefit from local effGen execution, especially:
 - Long or noisy context requiring prompt compression
 - Decomposable complex workflows
@@ -101,6 +117,11 @@ Requires machine-readable structured output matching `templates/result-schema.js
 - Wrapper import error.
 - Local execution failure due to resource constraints.
 - Docs and repo API mismatch across versions.
+- `custom_multi_agent` and `custom_tool_pipeline` modes are not yet implemented for
+  local effGen execution and will return a structured error; use a preset or the
+  OpenRouter backend instead.
+- `save_artifacts: true` does not auto-collect files; inspect the working directory
+  after the run for any outputs written by the agent.
 
 ## Verification
 - Valid JSON output from wrapper scripts.

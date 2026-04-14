@@ -75,6 +75,12 @@ def _security_scan_skill(skill_dir: Path) -> Optional[str]:
 
 import yaml
 
+from agent.skills_evolution_store import (
+    collect_skill_snapshot,
+    compute_unified_diff,
+    get_skills_evolution_store,
+)
+
 
 # All skills live in ~/.hermes/skills/ (single source of truth)
 HERMES_HOME = get_hermes_home()
@@ -286,6 +292,41 @@ def _atomic_write_text(file_path: Path, content: str, encoding: str = "utf-8") -
 
 
 # =============================================================================
+# Evolution tracking helpers
+# =============================================================================
+
+def _record_skill_evolution(
+    *,
+    skill_name: str,
+    skill_dir: Path,
+    action: str,
+    before_snapshot: Optional[Dict[str, str]],
+    after_snapshot: Optional[Dict[str, str]],
+    summary: str = "",
+) -> Optional[str]:
+    """Persist skill lineage metadata for dashboard/analysis features."""
+    try:
+        store = get_skills_evolution_store()
+        parent = store.latest_version(skill_name)
+        before = before_snapshot or {}
+        after = after_snapshot or {}
+        diff_text = compute_unified_diff(before, after)
+        return store.record_version(
+            skill_name=skill_name,
+            skill_path=str(skill_dir),
+            action=action,
+            parent_version_id=parent,
+            actor="skill_manage",
+            summary=summary,
+            snapshot=after,
+            diff_text=diff_text,
+        )
+    except Exception:
+        logger.exception("Failed to record skill evolution for '%s'", skill_name)
+        return None
+
+
+# =============================================================================
 # Core actions
 # =============================================================================
 
@@ -331,6 +372,16 @@ def _create_skill(name: str, content: str, category: str = None) -> Dict[str, An
         shutil.rmtree(skill_dir, ignore_errors=True)
         return {"success": False, "error": scan_error}
 
+    after_snapshot = collect_skill_snapshot(skill_dir)
+    version_id = _record_skill_evolution(
+        skill_name=name,
+        skill_dir=skill_dir,
+        action="create",
+        before_snapshot={},
+        after_snapshot=after_snapshot,
+        summary="Skill created",
+    )
+
     result = {
         "success": True,
         "message": f"Skill '{name}' created.",
@@ -339,6 +390,8 @@ def _create_skill(name: str, content: str, category: str = None) -> Dict[str, An
     }
     if category:
         result["category"] = category
+    if version_id:
+        result["version_id"] = version_id
     result["hint"] = (
         "To add reference files, templates, or scripts, use "
         "skill_manage(action='write_file', name='{}', file_path='references/example.md', file_content='...')".format(name)
@@ -361,6 +414,7 @@ def _edit_skill(name: str, content: str) -> Dict[str, Any]:
         return {"success": False, "error": f"Skill '{name}' not found. Use skills_list() to see available skills."}
 
     skill_md = existing["path"] / "SKILL.md"
+    before_snapshot = collect_skill_snapshot(existing["path"])
     # Back up original content for rollback
     original_content = skill_md.read_text(encoding="utf-8") if skill_md.exists() else None
     _atomic_write_text(skill_md, content)
@@ -372,11 +426,24 @@ def _edit_skill(name: str, content: str) -> Dict[str, Any]:
             _atomic_write_text(skill_md, original_content)
         return {"success": False, "error": scan_error}
 
-    return {
+    after_snapshot = collect_skill_snapshot(existing["path"])
+    version_id = _record_skill_evolution(
+        skill_name=name,
+        skill_dir=existing["path"],
+        action="edit",
+        before_snapshot=before_snapshot,
+        after_snapshot=after_snapshot,
+        summary="SKILL.md replaced",
+    )
+
+    result = {
         "success": True,
         "message": f"Skill '{name}' updated.",
         "path": str(existing["path"]),
     }
+    if version_id:
+        result["version_id"] = version_id
+    return result
 
 
 def _patch_skill(
@@ -453,6 +520,7 @@ def _patch_skill(
             }
 
     original_content = content  # for rollback
+    before_snapshot = collect_skill_snapshot(skill_dir)
     _atomic_write_text(target, new_content)
 
     # Security scan — roll back on block
@@ -461,10 +529,23 @@ def _patch_skill(
         _atomic_write_text(target, original_content)
         return {"success": False, "error": scan_error}
 
-    return {
+    after_snapshot = collect_skill_snapshot(skill_dir)
+    version_id = _record_skill_evolution(
+        skill_name=name,
+        skill_dir=skill_dir,
+        action="patch",
+        before_snapshot=before_snapshot,
+        after_snapshot=after_snapshot,
+        summary=f"Patched {'SKILL.md' if not file_path else file_path}",
+    )
+
+    result = {
         "success": True,
         "message": f"Patched {'SKILL.md' if not file_path else file_path} in skill '{name}' ({match_count} replacement{'s' if match_count > 1 else ''}).",
     }
+    if version_id:
+        result["version_id"] = version_id
+    return result
 
 
 def _delete_skill(name: str) -> Dict[str, Any]:
@@ -474,17 +555,37 @@ def _delete_skill(name: str) -> Dict[str, Any]:
         return {"success": False, "error": f"Skill '{name}' not found."}
 
     skill_dir = existing["path"]
+    before_snapshot = collect_skill_snapshot(skill_dir)
+    parent = get_skills_evolution_store().latest_version(name)
     shutil.rmtree(skill_dir)
 
     # Clean up empty category directories (don't remove SKILLS_DIR itself)
-    parent = skill_dir.parent
-    if parent != SKILLS_DIR and parent.exists() and not any(parent.iterdir()):
-        parent.rmdir()
+    parent_dir = skill_dir.parent
+    if parent_dir != SKILLS_DIR and parent_dir.exists() and not any(parent_dir.iterdir()):
+        parent_dir.rmdir()
 
-    return {
+    version_id = None
+    try:
+        version_id = get_skills_evolution_store().record_version(
+            skill_name=name,
+            skill_path=str(skill_dir),
+            action="delete",
+            parent_version_id=parent,
+            actor="skill_manage",
+            summary="Skill deleted",
+            snapshot={},
+            diff_text=compute_unified_diff(before_snapshot, {}),
+        )
+    except Exception:
+        logger.exception("Failed to record delete evolution for '%s'", name)
+
+    result = {
         "success": True,
         "message": f"Skill '{name}' deleted.",
     }
+    if version_id:
+        result["version_id"] = version_id
+    return result
 
 
 def _write_file(name: str, file_path: str, file_content: str) -> Dict[str, Any]:
@@ -519,6 +620,7 @@ def _write_file(name: str, file_path: str, file_content: str) -> Dict[str, Any]:
     if err:
         return {"success": False, "error": err}
     target.parent.mkdir(parents=True, exist_ok=True)
+    before_snapshot = collect_skill_snapshot(existing["path"])
     # Back up for rollback
     original_content = target.read_text(encoding="utf-8") if target.exists() else None
     _atomic_write_text(target, file_content)
@@ -532,11 +634,24 @@ def _write_file(name: str, file_path: str, file_content: str) -> Dict[str, Any]:
             target.unlink(missing_ok=True)
         return {"success": False, "error": scan_error}
 
-    return {
+    after_snapshot = collect_skill_snapshot(existing["path"])
+    version_id = _record_skill_evolution(
+        skill_name=name,
+        skill_dir=existing["path"],
+        action="write_file",
+        before_snapshot=before_snapshot,
+        after_snapshot=after_snapshot,
+        summary=f"Wrote supporting file: {file_path}",
+    )
+
+    result = {
         "success": True,
         "message": f"File '{file_path}' written to skill '{name}'.",
         "path": str(target),
     }
+    if version_id:
+        result["version_id"] = version_id
+    return result
 
 
 def _remove_file(name: str, file_path: str) -> Dict[str, Any]:
@@ -568,6 +683,7 @@ def _remove_file(name: str, file_path: str) -> Dict[str, Any]:
             "available_files": available if available else None,
         }
 
+    before_snapshot = collect_skill_snapshot(skill_dir)
     target.unlink()
 
     # Clean up empty subdirectories
@@ -575,10 +691,23 @@ def _remove_file(name: str, file_path: str) -> Dict[str, Any]:
     if parent != skill_dir and parent.exists() and not any(parent.iterdir()):
         parent.rmdir()
 
-    return {
+    after_snapshot = collect_skill_snapshot(skill_dir)
+    version_id = _record_skill_evolution(
+        skill_name=name,
+        skill_dir=skill_dir,
+        action="remove_file",
+        before_snapshot=before_snapshot,
+        after_snapshot=after_snapshot,
+        summary=f"Removed supporting file: {file_path}",
+    )
+
+    result = {
         "success": True,
         "message": f"File '{file_path}' removed from skill '{name}'.",
     }
+    if version_id:
+        result["version_id"] = version_id
+    return result
 
 
 # =============================================================================

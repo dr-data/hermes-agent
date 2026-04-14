@@ -484,3 +484,19 @@ class TestSkillManageDispatcher:
             raw = skill_manage(action="create", name="test-skill", content=VALID_SKILL_CONTENT)
         result = json.loads(raw)
         assert result["success"] is True
+
+
+class TestEvolutionMetadata:
+    def test_create_returns_version_id(self, tmp_path):
+        with _skill_dir(tmp_path):
+            result = _create_skill("my-skill", VALID_SKILL_CONTENT)
+        assert result["success"] is True
+        assert result.get("version_id", "").startswith("sv_")
+
+    def test_edit_returns_new_version_id(self, tmp_path):
+        with _skill_dir(tmp_path):
+            created = _create_skill("my-skill", VALID_SKILL_CONTENT)
+            edited = _edit_skill("my-skill", VALID_SKILL_CONTENT_2)
+        assert created["success"] is True
+        assert edited["success"] is True
+        assert created.get("version_id") != edited.get("version_id")

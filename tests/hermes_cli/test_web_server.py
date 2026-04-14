@@ -952,3 +952,70 @@ class TestModelInfoEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert data["auto_context_length"] == 0
+
+
+class TestEvolutionDashboardEndpoints:
+    @pytest.fixture(autouse=True)
+    def _setup_test_client(self):
+        try:
+            from starlette.testclient import TestClient
+        except ImportError:
+            pytest.skip("fastapi/starlette not installed")
+
+        from hermes_cli.web_server import app
+        self.client = TestClient(app)
+
+    def test_skills_evolution_endpoints(self, monkeypatch):
+        class DummyVersion:
+            version_id = "sv_1"
+            skill_name = "demo-skill"
+            skill_path = "/tmp/demo-skill"
+            action = "edit"
+            parent_version_id = "sv_0"
+            created_at = "2026-04-14T00:00:00+00:00"
+            actor = "skill_manage"
+            summary = "Updated"
+            diff_text = "@@ -1 +1 @@"
+            snapshot = {"SKILL.md": "hi"}
+
+        class DummyStore:
+            def list_skills(self, limit=100, query=""):
+                return [{"skill_name": "demo-skill", "version_count": 2, "last_updated": "now", "deleted": False}]
+
+            def get_skill_lineage(self, skill_name):
+                return [{"version_id": "sv_1", "action": "edit", "parent_version_id": "sv_0", "created_at": "now"}]
+
+            def get_version(self, version_id):
+                return DummyVersion()
+
+        monkeypatch.setattr("agent.skills_evolution_store.get_skills_evolution_store", lambda: DummyStore())
+
+        resp = self.client.get("/api/skills/evolution")
+        assert resp.status_code == 200
+        assert resp.json()["items"][0]["skill_name"] == "demo-skill"
+
+        resp = self.client.get("/api/skills/evolution/demo-skill")
+        assert resp.status_code == 200
+        assert resp.json()["count"] == 1
+
+        resp = self.client.get("/api/skills/evolution/version/sv_1")
+        assert resp.status_code == 200
+        assert resp.json()["version_id"] == "sv_1"
+
+    def test_collective_patterns_endpoint(self, monkeypatch):
+        class DummyStore:
+            def find_relevant(self, query, limit=20):
+                return [{"id": "ci_1", "task_goal": "Fix tests", "summary": "Use retries", "status": "completed"}]
+
+        monkeypatch.setattr("agent.collective_intelligence_store.get_collective_intelligence_store", lambda: DummyStore())
+
+        resp = self.client.get("/api/collective/patterns?query=tests")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["count"] == 1
+        assert data["items"][0]["id"] == "ci_1"
+
+    def test_skills_evolution_dashboard_page(self):
+        resp = self.client.get("/skills-evolution")
+        assert resp.status_code == 200
+        assert "Hermes Skills Evolution" in resp.text

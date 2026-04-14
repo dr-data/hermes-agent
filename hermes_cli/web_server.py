@@ -47,7 +47,7 @@ from gateway.status import get_running_pid, read_runtime_status
 try:
     from fastapi import FastAPI, HTTPException, Request
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import FileResponse, JSONResponse
+    from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
     from fastapi.staticfiles import StaticFiles
     from pydantic import BaseModel
 except ImportError:
@@ -1787,6 +1787,93 @@ async def delete_cron_job(job_id: str):
 # ---------------------------------------------------------------------------
 
 
+def _skills_evolution_dashboard_html() -> str:
+    """Small standalone dashboard for skill lineage and diff inspection."""
+    return """<!doctype html>
+<html lang=\"en\">
+<head>
+  <meta charset=\"utf-8\" />
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+  <title>Hermes Skills Evolution Dashboard</title>
+  <style>
+    body { font-family: Inter, system-ui, sans-serif; margin: 0; background:#0f1117; color:#e6eaf2; }
+    header { padding: 14px 18px; border-bottom:1px solid #2a2f3a; display:flex; gap:12px; align-items:center; }
+    input { background:#171c27; color:#e6eaf2; border:1px solid #2a2f3a; padding:8px; border-radius:8px; min-width: 280px; }
+    button { background:#2b5cff; color:white; border:none; padding:8px 12px; border-radius:8px; cursor:pointer; }
+    main { display:grid; grid-template-columns: 340px 1fr; height: calc(100vh - 58px); }
+    aside { border-right:1px solid #2a2f3a; overflow:auto; }
+    .item { padding:10px 12px; border-bottom:1px solid #1e2430; cursor:pointer; }
+    .item:hover { background:#171c27; }
+    .meta { color:#9aa4b2; font-size: 12px; }
+    section { overflow:auto; padding:14px; }
+    pre { background:#0a0d14; padding:12px; border-radius:10px; overflow:auto; border:1px solid #2a2f3a; }
+    .pill { display:inline-block; border:1px solid #3a4150; border-radius:999px; padding:1px 8px; font-size:12px; color:#aeb6c4; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Hermes Skills Evolution</strong>
+    <input id=\"q\" placeholder=\"Search skill name\" />
+    <button id=\"refresh\">Refresh</button>
+    <span class=\"meta\">Lineage + unified diff viewer</span>
+  </header>
+  <main>
+    <aside id=\"list\"></aside>
+    <section>
+      <div id=\"summary\" class=\"meta\">Select a skill to inspect lineage.</div>
+      <h3 id=\"title\"></h3>
+      <div id=\"versions\"></div>
+      <h4>Version Diff</h4>
+      <pre id=\"diff\">(select a version)</pre>
+    </section>
+  </main>
+<script>
+async function j(url){ const r = await fetch(url); if(!r.ok) throw new Error(await r.text()); return r.json(); }
+function esc(s){ return (s||'').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+async function loadSkills(){
+  const q = document.getElementById('q').value.trim();
+  const data = await j('/api/skills/evolution?limit=200&query=' + encodeURIComponent(q));
+  const list = document.getElementById('list');
+  list.innerHTML = '';
+  for (const item of data.items) {
+    const div = document.createElement('div');
+    div.className = 'item';
+    div.innerHTML = `<strong>${esc(item.skill_name)}</strong><div class=\"meta\">versions: ${item.version_count} · updated: ${esc(item.last_updated||'')}</div>`;
+    div.onclick = () => loadLineage(item.skill_name);
+    list.appendChild(div);
+  }
+}
+
+async function loadLineage(skill){
+  const data = await j('/api/skills/evolution/' + encodeURIComponent(skill));
+  document.getElementById('title').textContent = skill;
+  document.getElementById('summary').textContent = `${data.count} versions`;
+  const versions = document.getElementById('versions');
+  versions.innerHTML = '';
+  for (const v of data.lineage.slice().reverse()) {
+    const div = document.createElement('div');
+    div.className = 'item';
+    div.innerHTML = `<span class=\"pill\">${esc(v.action)}</span> <strong>${esc(v.version_id)}</strong><div class=\"meta\">${esc(v.created_at||'')} · parent: ${esc(v.parent_version_id||'none')}</div>`;
+    div.onclick = () => loadVersion(v.version_id);
+    versions.appendChild(div);
+  }
+}
+
+async function loadVersion(versionId){
+  const data = await j('/api/skills/evolution/version/' + encodeURIComponent(versionId));
+  document.getElementById('diff').textContent = data.diff_text || '(no diff content)';
+}
+
+document.getElementById('refresh').onclick = () => loadSkills();
+loadSkills().catch(err => {
+  document.getElementById('summary').textContent = 'Error: ' + err.message;
+});
+</script>
+</body>
+</html>"""
+
+
 class SkillToggle(BaseModel):
     name: str
     enabled: bool
@@ -1815,6 +1902,74 @@ async def toggle_skill(body: SkillToggle):
         disabled.add(body.name)
     save_disabled_skills(config, disabled)
     return {"ok": True, "name": body.name, "enabled": body.enabled}
+
+
+@app.get("/api/skills/evolution")
+async def list_skill_evolution(query: str = "", limit: int = 100):
+    from agent.skills_evolution_store import get_skills_evolution_store
+
+    store = get_skills_evolution_store()
+    return {
+        "items": store.list_skills(limit=limit, query=query),
+        "query": query,
+        "limit": limit,
+    }
+
+
+@app.get("/api/skills/evolution/{skill_name}")
+async def get_skill_evolution(skill_name: str):
+    from agent.skills_evolution_store import get_skills_evolution_store
+
+    store = get_skills_evolution_store()
+    lineage = store.get_skill_lineage(skill_name)
+    if not lineage:
+        raise HTTPException(status_code=404, detail=f"No evolution history for skill '{skill_name}'")
+    return {
+        "skill_name": skill_name,
+        "lineage": lineage,
+        "count": len(lineage),
+    }
+
+
+@app.get("/api/skills/evolution/version/{version_id}")
+async def get_skill_evolution_version(version_id: str):
+    from agent.skills_evolution_store import get_skills_evolution_store
+
+    store = get_skills_evolution_store()
+    record = store.get_version(version_id)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Unknown version_id: {version_id}")
+    return {
+        "version_id": record.version_id,
+        "skill_name": record.skill_name,
+        "skill_path": record.skill_path,
+        "action": record.action,
+        "parent_version_id": record.parent_version_id,
+        "created_at": record.created_at,
+        "actor": record.actor,
+        "summary": record.summary,
+        "diff_text": record.diff_text,
+        "snapshot": record.snapshot,
+    }
+
+
+@app.get("/api/collective/patterns")
+async def get_collective_patterns(query: str = "", limit: int = 20):
+    from agent.collective_intelligence_store import get_collective_intelligence_store
+
+    store = get_collective_intelligence_store()
+    items = store.find_relevant(query=query, limit=limit) if query.strip() else []
+    return {
+        "query": query,
+        "limit": limit,
+        "count": len(items),
+        "items": items,
+    }
+
+
+@app.get("/skills-evolution", response_class=HTMLResponse)
+async def skills_evolution_dashboard():
+    return HTMLResponse(_skills_evolution_dashboard_html())
 
 
 @app.get("/api/tools/toolsets")

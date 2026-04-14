@@ -26,6 +26,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
 
 from toolsets import TOOLSETS
+from agent.collective_intelligence_store import get_collective_intelligence_store
 
 
 # Tools that children must never have access to
@@ -620,6 +621,52 @@ def _run_single_child(
         except Exception:
             logger.debug("Failed to close child agent after delegation")
 
+
+def _build_collective_context(goal: str, context: Optional[str]) -> Optional[str]:
+    """Inject relevant prior delegation patterns into child context."""
+    try:
+        matches = get_collective_intelligence_store().find_relevant(goal, limit=3)
+    except Exception:
+        logger.debug("Collective intelligence lookup failed", exc_info=True)
+        return context
+
+    if not matches:
+        return context
+
+    lines = [
+        "COLLECTIVE PRIOR KNOWLEDGE (from previous delegated tasks):",
+    ]
+    for idx, item in enumerate(matches, start=1):
+        summary = (item.get("summary") or "").strip()
+        if len(summary) > 450:
+            summary = summary[:447] + "..."
+        lines.append(
+            f"{idx}. Goal: {item.get('task_goal', '')}\n"
+            f"   Status: {item.get('status', 'unknown')}, Score: {item.get('score', 0):.2f}\n"
+            f"   Outcome: {summary}"
+        )
+
+    block = "\n".join(lines)
+    if context and context.strip():
+        return f"{context.rstrip()}\n\n{block}"
+    return block
+
+
+def _record_collective_result(task: Dict[str, Any], result: Dict[str, Any]) -> None:
+    """Persist delegation outcomes for future pattern reuse."""
+    try:
+        get_collective_intelligence_store().record_result(
+            task_goal=task.get("goal", ""),
+            context_excerpt=task.get("context", "") or "",
+            summary=result.get("summary", "") or result.get("error", "") or "",
+            status=result.get("status", "unknown") or "unknown",
+            duration_seconds=float(result.get("duration_seconds", 0) or 0),
+            toolsets=task.get("toolsets") if isinstance(task.get("toolsets"), list) else [],
+        )
+    except Exception:
+        logger.debug("Failed to persist collective intelligence result", exc_info=True)
+
+
 def delegate_task(
     goal: Optional[str] = None,
     context: Optional[str] = None,
@@ -691,6 +738,10 @@ def delegate_task(
     for i, task in enumerate(task_list):
         if not task.get("goal", "").strip():
             return tool_error(f"Task {i} is missing a 'goal'.")
+
+    # Inject relevant prior delegated outcomes into each child context.
+    for task in task_list:
+        task["context"] = _build_collective_context(task.get("goal", ""), task.get("context"))
 
     overall_start = time.monotonic()
     results = []
@@ -791,6 +842,15 @@ def delegate_task(
 
         # Sort by task_index so results match input order
         results.sort(key=lambda r: r["task_index"])
+
+    # Persist delegation outcomes in collective intelligence store.
+    for entry in results:
+        try:
+            idx = entry.get("task_index", -1)
+            if isinstance(idx, int) and 0 <= idx < len(task_list):
+                _record_collective_result(task_list[idx], entry)
+        except Exception:
+            logger.debug("Failed writing collective result", exc_info=True)
 
     # Notify parent's memory provider of delegation outcomes
     if parent_agent and hasattr(parent_agent, '_memory_manager') and parent_agent._memory_manager:

@@ -80,6 +80,28 @@ def _skip_if_no_openrouter_key():
         pytest.skip("OPENROUTER_API_KEY / OPENROUTER_API not set; skipping OpenRouter test")
 
 
+def _is_temporary_openrouter_upstream_429(error: dict) -> bool:
+    """Return True for transient upstream 429 errors that should be skipped in CI."""
+    message = str(error.get("message", "")).lower()
+    details = str(error.get("details", "")).lower()
+    return (
+        "http 429" in message
+        and (
+            "temporarily rate-limited upstream" in details
+            or "please retry shortly" in details
+        )
+    )
+
+
+def _skip_if_temporary_openrouter_upstream_429(output: dict, model: str):
+    """Skip flaky assertions when OpenRouter reports transient upstream throttling."""
+    for err in output.get("errors", []):
+        if isinstance(err, dict) and _is_temporary_openrouter_upstream_429(err):
+            pytest.skip(
+                f"OpenRouter upstream is temporarily rate-limited for {model}; skipping"
+            )
+
+
 def _openrouter_config(model: str, goal: str, task_type: str = "minimal", **extra) -> dict:
     """Return a minimal OpenRouter config dict with sensible defaults."""
     cfg = {
@@ -208,11 +230,13 @@ def test_effgen_openrouter_gemma3n_e2b():
     Validates Google's Gemma 3n Edge 2B model on a basic arithmetic task.
     """
     _skip_if_no_openrouter_key()
+    model = "google/gemma-3n-e2b-it:free"
     config = _openrouter_config(
-        "google/gemma-3n-e2b-it:free",
+        model,
         "What is 6 plus 9? Respond with only the number.",
     )
     output = _run_task(config)
+    _skip_if_temporary_openrouter_upstream_429(output, model)
     _assert_valid_result_schema(output)
     assert output["mode_selected"].startswith("openrouter:")
     assert output["errors"] == [], f"Unexpected errors: {output['errors']}"
@@ -265,6 +289,7 @@ def test_openrouter_result_mode_label_contains_model_name():
     model = "google/gemma-3n-e2b-it:free"
     config = _openrouter_config(model, "Say 'ok'.")
     output = _run_task(config)
+    _skip_if_temporary_openrouter_upstream_429(output, model)
     assert output["mode_selected"] == f"openrouter:{model}", (
         f"Unexpected mode_selected: {output['mode_selected']!r}"
     )
@@ -328,12 +353,14 @@ def test_openrouter_routing_qa_task_type_gemma():
     Validates that Gemma 3n correctly answers a knowledge question.
     """
     _skip_if_no_openrouter_key()
+    model = "google/gemma-3n-e2b-it:free"
     config = _openrouter_config(
-        "google/gemma-3n-e2b-it:free",
+        model,
         "How many planets are in the solar system? Answer with only the number.",
         task_type="qa",
     )
     output = _run_task(config)
+    _skip_if_temporary_openrouter_upstream_429(output, model)
     _assert_valid_result_schema(output)
     assert output["errors"] == []
     assert "8" in str(output["output"]), (
@@ -375,6 +402,7 @@ def test_openrouter_summarisation_gemma():
     This validates the model's text-compression capability via the skill.
     """
     _skip_if_no_openrouter_key()
+    model = "google/gemma-3n-e2b-it:free"
     paragraph = (
         "The Python programming language was created by Guido van Rossum and first "
         "released in 1991. It emphasises code readability and simplicity, making it "
@@ -384,12 +412,13 @@ def test_openrouter_summarisation_gemma():
         "functional programming."
     )
     config = _openrouter_config(
-        "google/gemma-3n-e2b-it:free",
+        model,
         f"Summarise the following in exactly one sentence:\n\n{paragraph}",
         task_type="general",
         timeout=60,
     )
     output = _run_task(config)
+    _skip_if_temporary_openrouter_upstream_429(output, model)
     _assert_valid_result_schema(output)
     assert output["errors"] == []
     result_text = str(output["output"]).strip()
@@ -447,12 +476,33 @@ def test_openrouter_all_three_models_answer_same_question():
     for model in models:
         config = _openrouter_config(model, question)
         output = _run_task(config)
+        _skip_if_temporary_openrouter_upstream_429(output, model)
         _assert_valid_result_schema(output)
         if output["errors"]:
             failures.append(f"{model}: errors={output['errors']}")
         elif "5" not in str(output["output"]):
             failures.append(f"{model}: expected '5', got {output['output']!r}")
     assert not failures, "Some models failed:\n" + "\n".join(failures)
+
+
+def test_is_temporary_openrouter_upstream_429_detection():
+    error = {
+        "message": "OpenRouter API returned HTTP 429.",
+        "details": (
+            '{"error":{"message":"Provider returned error","code":429,'
+            '"metadata":{"raw":"model is temporarily rate-limited upstream. '
+            'Please retry shortly"}}}'
+        ),
+    }
+    assert _is_temporary_openrouter_upstream_429(error) is True
+
+
+def test_is_temporary_openrouter_upstream_429_not_matched_for_other_429():
+    error = {
+        "message": "OpenRouter API returned HTTP 429.",
+        "details": '{"error":{"message":"Insufficient credits","code":429}}',
+    }
+    assert _is_temporary_openrouter_upstream_429(error) is False
 
 
 # ---- Error path (always-on, no real API call) ---------------------------------
